@@ -1,0 +1,23 @@
+# 运行时数据与状态
+config.json
+state.json
+run.log
+startup_backup.json
+disabled_startup/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec
+
+# 单文件发布包（源码 OneKeyRunTool.py 已保留）
+OneKeyRunTool.exe
+
+# 设计素材（非代码资源）
+app.png
+icon_preview.png
