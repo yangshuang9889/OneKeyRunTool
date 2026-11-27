@@ -18,8 +18,16 @@ v1.2.2 图标改造：新增 app.ico 作为程序图标，打包时注入 exe �
 resource_path() 兼容 PyInstaller 单文件解压目录（sys._MEIPASS），主窗口与
 「本机启动项」子窗口统一显示同一图标。
 
+v1.2.3 权限提示修正：原先 WinError 5 / PermissionError 一律被翻译成「需要以
+管理员身份运行本工具」，导致已提权但被安全软件自我保护拦截（如火绒保护自己的
+Run 启动项）时给出错误指引。现在异常兜底先复检 is_admin()：已提权时改报「操作
+被安全软件自我保护或目标被占用拦截」并附 WinError 原文，仅在确实未提权时才提示
+需要管理员；启动文件夹类失败统一报「文件被占用或无访问权限」；禁止启动确认框的
+权限说明按实际 is_admin() 动态生成；打包改用 --uac-admin 让 exe 自带
+requireAdministrator 清单。
+
 作者：杨爽工作室
-版本：1.2.2
+版本：1.2.3
 
 命令行用法（静默执行，不打开界面，执行记录写入 run.log）：
     OneKeyRunTool.exe --run "配置名"      启动指定项
@@ -45,7 +53,7 @@ import winreg
 # ---------------------------------------------------------------- 常量
 
 APP_TITLE = "一键启停工具"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 AUTHOR = "杨爽工作室"
 
 ICON_NAME = "app.ico"
@@ -811,6 +819,35 @@ def _is_denied(exc):
     return getattr(exc, "winerror", None) == 5
 
 
+def _err_text(exc):
+    """把异常整理成「WinError 5: 拒绝访问」形式，便于定位真实原因。"""
+    code = getattr(exc, "winerror", None)
+    detail = (getattr(exc, "strerror", "") or str(exc) or "").strip().rstrip("。")
+    if code is None:
+        return detail or repr(exc)
+    return "WinError %s: %s" % (code, detail)
+
+
+def _denied_msg(exc, action="修改"):
+    """权限类异常的最终提示：已提权时不再提示「需要管理员」。
+
+    已提权仍被拒绝，通常是被安全软件的自我保护拦截（杀软保护自己的开机项），
+    或目标被占用，此时给出可操作指引；只有确实未提权才提示需要管理员。
+    """
+    if is_admin():
+        return ("操作被安全软件自我保护或目标被占用拦截，无法%s（%s）；"
+                "若是安全软件的启动项（如火绒），请到该安全软件的启动项管理中关闭该项"
+                % (action, _err_text(exc)))
+    return _need_admin_msg()
+
+
+def _file_denied_msg(exc):
+    """启动文件夹类操作的失败提示：与管理员权限无关，按占用 / 访问权处理。"""
+    return ("文件被占用或无访问权限，无法移动（%s）；"
+            "若该文件属于安全软件，请到安全软件的启动项管理中关闭该项"
+            % _err_text(exc))
+
+
 def _now_str():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1013,7 +1050,8 @@ def disable_registry_item(row, data):
         except FileNotFoundError:
             return False, "对应的 Run 注册表键不存在"
         except OSError as e:
-            return False, _need_admin_msg() if _is_denied(e) else "打开注册表失败：%s" % e
+            return False, _denied_msg(e, "打开注册表键") if _is_denied(e) \
+                else "打开注册表失败：%s" % e
         try:
             value, vtype = winreg.QueryValueEx(key, name)
         except FileNotFoundError:
@@ -1048,7 +1086,7 @@ def disable_registry_item(row, data):
             except Exception:
                 pass
             if _is_denied(e):
-                return False, _need_admin_msg()
+                return False, _denied_msg(e, "删除该 Run 值")
             return False, "删除注册表值失败，已回滚备份记录：%s" % e
 
         try:
@@ -1111,7 +1149,7 @@ def disable_file_item(row, data):
             except Exception:
                 pass
             if _is_denied(e):
-                return False, _need_admin_msg()
+                return False, _file_denied_msg(e)
             return False, "移动文件失败，已回滚备份记录：%s" % e
         return True, "已移动到 disabled_startup（原名 %s）" % rec["name"]
     finally:
@@ -1178,7 +1216,8 @@ def restore_registry_item(rec, data):
             key = winreg.CreateKeyEx(hive, subkey, 0,
                                      winreg.KEY_READ | winreg.KEY_SET_VALUE)
         except OSError as e:
-            return False, _need_admin_msg() if _is_denied(e) else "打开注册表失败：%s" % e
+            return False, _denied_msg(e, "打开注册表键") if _is_denied(e) \
+                else "打开注册表失败：%s" % e
 
         try:
             exist, _exist_type = winreg.QueryValueEx(key, name)
@@ -1192,7 +1231,8 @@ def restore_registry_item(rec, data):
         try:
             winreg.SetValueEx(key, name, 0, vtype, value)
         except OSError as e:
-            return False, _need_admin_msg() if _is_denied(e) else "写回注册表失败：%s" % e
+            return False, _denied_msg(e, "写回该 Run 值") if _is_denied(e) \
+                else "写回注册表失败：%s" % e
 
         try:
             winreg.QueryValueEx(key, name)
@@ -1228,7 +1268,7 @@ def restore_file_item(rec, data):
         shutil.move(stored, orig)
     except Exception as e:
         if _is_denied(e):
-            return False, _need_admin_msg()
+            return False, _file_denied_msg(e)
         return False, "移回原位置失败：%s" % e
     return True, "已恢复到原位置"
 
@@ -1668,6 +1708,7 @@ class StartupWindow(object):
         return [it for it, v in zip(self.items, self.vars) if v.get()]
 
     def _confirm_lines(self, rows, action):
+        admin = is_admin()
         lines = []
         if action == "disable":
             lines.append("将禁止以下 %d 项开机自启动：" % len(rows))
@@ -1683,7 +1724,13 @@ class StartupWindow(object):
             lines.append("  · 注册表项：先把名称/命令/值类型/来源备份到 startup_backup.json，再删除 Run 值")
             lines.append("  · 启动文件夹项：文件移入 disabled_startup 目录保留，不会真正删除")
             lines.append("  · 变更后这些项将不再随开机自动运行，可随时用「恢复启动」原样还原")
-            lines.append("  · HKLM 与公共启动文件夹需要以管理员身份运行本工具")
+            if admin:
+                lines.append("  · 当前已具备管理员权限，HKLM 与公共启动文件夹可直接操作")
+                lines.append("  · 若仍失败，多是被安全软件自我保护拦住，"
+                             "可到该安全软件的启动项管理中关闭该项")
+            else:
+                lines.append("  · 当前非管理员权限：HKLM 与公共启动文件夹"
+                             "需要以管理员身份运行本工具")
         else:
             lines.append("影响说明：")
             lines.append("  · 注册表项：按备份原样写回 Run 键")

@@ -11,7 +11,7 @@
 - **本机启动项导入**：一键扫描系统自启动项并生成配置；支持禁止 / 恢复启动项（可逆备份）。
 - **命令行接口**：`--run`、`--stop`、`--run-all`、`--stop-all`、`--list`，适合开机脚本与快捷方式。
 - **零依赖**：纯 Python + tkinter + ctypes，无需安装任何第三方库即可运行。
-- **单文件发布**：PyInstaller 打包为单个 exe，双击即用，免安装。
+- **单文件发布**：PyInstaller 打包为单个 exe（自带 UAC 管理员清单），双击即用，免安装。
 
 ## 安装使用
 
@@ -45,13 +45,17 @@ OneKeyRunTool.exe --list              :: 列出配置与状态
 pip install pyinstaller==6.22.3
 pyinstaller ^
     --onefile --windowed ^
+    --uac-admin ^
     --icon "app.ico" ^
     --add-data "app.ico;." ^
     --name "OneKeyRunTool" ^
+    --version-file version_info.txt ^
     OneKeyRunTool.py
 ```
 
-版本信息通过 `version_info.txt` 注入（公司名 / 版权填「杨爽工作室」）。
+版本信息通过 `version_info.txt` 注入（公司名 / 版权填「杨爽工作室」）。`--uac-admin`
+会给 exe 嵌入 `requireAdministrator` 清单，双击即弹 UAC 以管理员身份启动，可直接操作
+HKLM 启动项；若无该参数，程序仍可运行，但只对 HKCU 与用户启动文件夹生效。
 
 详细构建步骤见 [开发手册.md](开发手册.md)。
 
